@@ -3,108 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鏡頭端 (除錯模式)</title>
+    <title>鏡頭端 - BioMotion Link</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #FAF9F6; padding: 20px; text-align: center; }
+        :root { --bg-color: #FAF9F6; --accent-color: #800020; --text-color: #333333; }
+        body { background-color: var(--bg-color); color: var(--text-color); font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        h2 { color: var(--accent-color); font-weight: 700; margin-bottom: 20px; }
         
-        #log-box {
-            background: #333; color: #0f0; font-family: monospace;
-            padding: 10px; height: 150px; overflow-y: scroll;
-            text-align: left; font-size: 12px; margin-bottom: 20px;
-            border-radius: 8px;
+        .card {
+            background: white; width: 100%; max-width: 400px; border-radius: 12px; padding: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px; box-sizing: border-box;
+            border-top: 4px solid var(--accent-color);
         }
-
-        video { width: 100%; border-radius: 8px; background: #000; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; color: #555; }
+        select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; background: #fff; outline: none; }
         
-        .big-id { font-size: 32px; color: #800020; font-weight: bold; margin: 10px 0; }
-        
-        button {
-            padding: 15px 30px; font-size: 18px; background: #800020;
-            color: white; border: none; border-radius: 8px; cursor: pointer;
-            width: 100%; margin-bottom: 20px;
+        .btn-start {
+            background-color: var(--accent-color); color: white; width: 100%; padding: 15px;
+            border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
         }
+        
+        #id-container { display: none; text-align: center; }
+        .big-id { font-size: 36px; color: var(--accent-color); font-weight: 800; letter-spacing: 5px; margin: 15px 0; background: #f4f4f4; padding: 10px; border-radius: 8px; }
+        
+        video { width: 100%; border-radius: 8px; background: #000; margin-top: 15px; }
+        .status-badge { display: inline-block; padding: 6px 12px; background: #eee; border-radius: 20px; font-size: 13px; color: #666; margin-top: 5px; font-weight: 500; }
+        .status-badge.connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        
+        .footer-info { font-size: 12px; color: #999; margin-top: auto; }
     </style>
 </head>
 <body>
+    <h2>鏡頭端設定</h2>
 
-    <h2>鏡頭端 (除錯版)</h2>
-    
-    <div id="log-box">等待操作...<br></div>
-
-    <button onclick="startCamera()">1. 啟動相機 & 獲取 ID</button>
-
-    <div id="info-area" style="display:none;">
-        <p>你的 ID (請輸入到電腦):</p>
-        <div class="big-id" id="my-id">...</div>
-        <video id="localVideo" autoplay muted playsinline></video>
+    <div class="card" id="settings-card">
+        <div class="form-group">
+            <label>1. 設定訓練項目</label>
+            <select id="exercise-type">
+                <option value="squat">深蹲 (Squat)</option>
+                <option value="deadlift">硬舉 (Deadlift)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>2. 畫面拍攝角度</label>
+            <select id="camera-angle">
+                <option value="sagittal">側面觀 (矢狀面)</option>
+                <option value="frontal_back">背面觀 (額狀面)</option>
+                <option value="frontal_front">正面觀 (額狀面)</option>
+            </select>
+        </div>
+        <button class="btn-start" onclick="initCamera()">啟動鏡頭 & 獲取 ID</button>
     </div>
 
-    <script>
-        // 日誌功能
-        function log(msg) {
-            const box = document.getElementById('log-box');
-            const time = new Date().toLocaleTimeString();
-            box.innerHTML = `[${time}] ${msg}<br>` + box.innerHTML;
-        }
+    <div class="card" id="id-container">
+        <label>請將此號碼輸入至電腦端：</label>
+        <div class="big-id" id="my-peer-id">...</div>
+        <div class="status-badge" id="conn-status">啟動中...</div>
+        <video id="localVideo" autoplay muted playsinline></video>
+        <p style="font-size:12px; color:#888; margin-top:10px;">請保持螢幕開啟，勿鎖定手機</p>
+    </div>
+    
+    <div class="footer-info">BioMotion Link &copy; 2025</div>
 
+    <script>
         let peer;
         let localStream;
 
-        async function startCamera() {
-            log("正在請求相機權限...");
-            try {
-                // 1. 先拿相機
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: 640 }, 
-                    audio: false 
-                });
-                
-                document.getElementById('localVideo').srcObject = localStream;
-                document.getElementById('info-area').style.display = 'block';
-                log("✅ 相機啟動成功！正在連線伺服器...");
-
-                // 2. 再連 PeerJS
-                initPeer();
-
-            } catch (err) {
-                log("❌ 相機失敗: " + err.message);
-                alert("請確認你是用 Safari (iOS) 或 Chrome (Android)，不要用 Line 開！");
-            }
+        function generateShortId() {
+            return Math.floor(1000 + Math.random() * 9000).toString();
         }
 
         function initPeer() {
-            // 產生隨機 4 位數 ID
-            const shortId = Math.floor(1000 + Math.random() * 9000).toString();
+            const shortId = generateShortId();
             peer = new Peer(shortId);
 
             peer.on('open', (id) => {
-                document.getElementById('my-id').innerText = id;
-                log(`✅ ID 獲取成功: ${id}`);
-                log(`👉 請在電腦輸入此 ID`);
+                document.getElementById('my-peer-id').innerText = id;
+                document.getElementById('conn-status').innerText = "等待電腦連線...";
             });
 
             peer.on('error', (err) => {
-                log(`❌ Peer 錯誤: ${err.type}`);
-            });
-
-            // 關鍵：監聽電腦連線
-            peer.on('connection', (conn) => {
-                log(`📞 收到電腦 (${conn.peer}) 的連線請求！`);
-                log(`🚀 正在回傳影像給電腦...`);
-                
-                if (localStream) {
-                    // 主動回撥影像
-                    const call = peer.call(conn.peer, localStream);
-                    
-                    call.on('close', () => { log("連線結束"); });
-                    call.on('error', (err) => { log("回傳失敗: " + err); });
-                    
-                    log(`📡 影像訊號已發送！`);
+                if (err.type === 'unavailable-id') {
+                    peer.destroy();
+                    setTimeout(initPeer, 200);
                 } else {
-                    log(`❌ 錯誤：找不到相機影像流，無法回傳。`);
+                    alert("連線錯誤: " + err.type);
                 }
             });
+
+            peer.on('connection', (conn) => {
+                const badge = document.getElementById('conn-status');
+                badge.innerText = "✅ 已連線至主控台";
+                badge.classList.add('connected');
+                
+                // 連線建立後，等待對方呼叫或直接發起通話
+                // 這裡我們被動等待電腦端打過來，或者主動把流丟過去
+                // 為了穩定，我們使用 call 方式
+                if(localStream) {
+                    peer.call(conn.peer, localStream);
+                }
+            });
+            
+            // 處理被動的通話請求 (如果電腦端發起)
+            peer.on('call', (call) => {
+                call.answer(localStream);
+            });
+        }
+
+        async function initCamera() {
+            const settingsCard = document.getElementById('settings-card');
+            const idContainer = document.getElementById('id-container');
+            const statusBadge = document.getElementById('conn-status');
+
+            settingsCard.style.display = 'none';
+            idContainer.style.display = 'block';
+            statusBadge.innerText = "正在請求相機權限...";
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }, 
+                    audio: false 
+                });
+                document.getElementById('localVideo').srcObject = localStream;
+                statusBadge.innerText = "相機就緒，正在獲取 ID...";
+                
+                initPeer();
+            } catch (err) {
+                alert("無法開啟相機，請確認權限或網址是否為 HTTPS");
+                settingsCard.style.display = 'block';
+                idContainer.style.display = 'none';
+            }
         }
     </script>
 </body>
