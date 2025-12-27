@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鏡頭端 - BioMotion Link</title>
+    <title>鏡頭端 - IDYS</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         :root { --bg-color: #FAF9F6; --accent-color: #800020; --text-color: #333333; }
@@ -35,7 +35,7 @@
     </style>
 </head>
 <body>
-    <h2>鏡頭端設定</h2>
+    <h2>IDYS 鏡頭端 (I Do)</h2>
 
     <div class="card" id="settings-card">
         <div class="form-group">
@@ -48,9 +48,9 @@
         <div class="form-group">
             <label>2. 畫面拍攝角度</label>
             <select id="camera-angle">
-                <option value="sagittal">側面觀 (矢狀面)</option>
-                <option value="frontal_back">背面觀 (額狀面)</option>
-                <option value="frontal_front">正面觀 (額狀面)</option>
+                <option value="sagittal">側面觀 (Side)</option>
+                <option value="frontal_back">背面觀 (Back)</option>
+                <option value="frontal_front">正面觀 (Front)</option>
             </select>
         </div>
         <button class="btn-start" onclick="initCamera()">啟動鏡頭 & 獲取 ID</button>
@@ -64,7 +64,7 @@
         <p style="font-size:12px; color:#888; margin-top:10px;">請保持螢幕開啟，勿鎖定手機</p>
     </div>
     
-    <div class="footer-info">BioMotion Link &copy; 2025</div>
+    <div class="footer-info">IDYS Analysis System &copy; 2025</div>
 
     <script>
         let peer;
@@ -97,15 +97,11 @@
                 badge.innerText = "✅ 已連線至主控台";
                 badge.classList.add('connected');
                 
-                // 連線建立後，等待對方呼叫或直接發起通話
-                // 這裡我們被動等待電腦端打過來，或者主動把流丟過去
-                // 為了穩定，我們使用 call 方式
                 if(localStream) {
                     peer.call(conn.peer, localStream);
                 }
             });
             
-            // 處理被動的通話請求 (如果電腦端發起)
             peer.on('call', (call) => {
                 call.answer(localStream);
             });
