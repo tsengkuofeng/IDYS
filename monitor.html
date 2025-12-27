@@ -3,262 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>姿勢回饋系統 - 監控端</title>
+    <title>BioMotion - 監控端 (除錯模式)</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
     <style>
-        :root {
-            --bg-color: #FAF9F6;
-            --accent-color: #800020;
-            --text-color: #333333;
-            --gray-light: #E0E0E0;
+        :root { --bg: #FAF9F6; --accent: #800020; }
+        body { background: var(--bg); font-family: sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        
+        /* 除錯視窗樣式 */
+        #debug-console {
+            width: 90%; max-width: 600px; height: 150px;
+            background: #333; color: #0f0; font-family: monospace;
+            padding: 10px; overflow-y: scroll; border-radius: 8px;
+            margin-bottom: 20px; font-size: 12px;
         }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+        .controls { background: white; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        input { padding: 10px; font-size: 16px; border: 1px solid #ccc; width: 120px; text-align: center; }
+        button { padding: 10px 20px; background: var(--accent); color: white; border: none; font-size: 16px; cursor: pointer; border-radius: 4px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
 
-        /* --- 彈窗與標題樣式 --- */
-        #disclaimer-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); display: flex; justify-content: center; align-items: center; z-index: 999; backdrop-filter: blur(5px); }
-        .modal-content { background: var(--bg-color); padding: 40px; border-radius: 8px; max-width: 500px; text-align: center; border-top: 5px solid var(--accent-color); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-        .btn-primary { background-color: var(--accent-color); color: white; border: none; padding: 12px 30px; font-size: 16px; border-radius: 4px; cursor: pointer; transition: opacity 0.3s; }
-        .btn-primary:hover { opacity: 0.9; }
-        
-        header { text-align: center; padding: 20px 0; border-bottom: 1px solid var(--gray-light); }
-        h1 { margin: 0; font-weight: 700; color: var(--text-color); letter-spacing: 1px; }
-        .subtitle { color: var(--accent-color); font-size: 14px; margin-top: 8px; font-weight: 500; }
-        
-        /* --- 主容器與設定卡片 --- */
-        .main-container { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; overflow-y: auto; }
-        .setup-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 600px; text-align: center; margin-bottom: 20px; }
-        
-        .input-group { margin: 15px 0; text-align: left; }
-        .input-group label { display: block; margin-bottom: 5px; font-size: 13px; font-weight: bold; color: #666; }
-        .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
-        
-        .camera-options { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
-        .option-btn { background: transparent; border: 1px solid var(--accent-color); color: var(--accent-color); padding: 8px 16px; border-radius: 20px; cursor: pointer; transition: all 0.2s; }
-        .option-btn:hover { background: rgba(128,0,32,0.1); }
-        .option-btn.active { background: var(--accent-color); color: white; }
-
-        /* --- 影片格線系統 --- */
-        #video-grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 20px; }
-        .video-wrapper { position: relative; background: #000; border-radius: 8px; overflow: hidden; width: 320px; aspect-ratio: 3/4; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-        /* 為單鏡頭時放大顯示 */
-        .video-wrapper.single-mode { width: 640px; aspect-ratio: 4/3; }
-        
+        #video-container { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+        .vid-box { width: 320px; height: 400px; background: black; position: relative; }
         video, canvas { width: 100%; height: 100%; object-fit: cover; }
-        /* 隱藏原始 video，只顯示 canvas (如果要畫線) */
-        video { display: none; } 
-
-        .overlay-label { position: absolute; top: 10px; left: 10px; background: rgba(128, 0, 32, 0.9); color: white; padding: 4px 10px; font-size: 12px; border-radius: 4px; z-index: 10; font-weight: bold; letter-spacing: 0.5px; }
-        
-        /* 狀態訊息 */
-        .status-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #aaa; font-size: 14px; text-align: center;}
-
-        footer { text-align: center; padding: 15px; font-size: 12px; color: #888; border-top: 1px solid var(--gray-light); }
+        video { display: none; }
+        .label { position: absolute; top: 5px; left: 5px; background: rgba(128,0,32,0.8); color: white; padding: 2px 8px; font-size: 12px; }
     </style>
 </head>
 <body>
 
-    <div id="disclaimer-modal">
-        <div class="modal-content">
-            <h2 style="color:var(--accent-color); margin-top:0;">使用前聲明</h2>
-            <p style="text-align:left; line-height:1.6; color:#555;">本系統為姿勢訓練回饋輔助工具，旨在協助優化運動軌跡。<br><br>若您有急性疼痛、舊傷復發或任何骨骼肌肉系統疾病，請務必停止使用並尋求專業醫師或物理治療師的協助。</p>
-            <button class="btn-primary" onclick="document.getElementById('disclaimer-modal').style.display='none'">我了解，繼續</button>
-        </div>
+    <h2>BioMotion 監控端 (除錯版)</h2>
+    
+    <div id="debug-console">系統啟動中...<br></div>
+
+    <div class="controls">
+        <p>請輸入手機上的 4 位數 ID：</p>
+        <input type="text" id="target-id" placeholder="例如 8851">
+        <button id="btn-connect" onclick="startConnection()" disabled>等待系統就緒...</button>
     </div>
 
-    <header>
-        <h1>姿勢回饋系統</h1>
-        <div class="subtitle">你是我的眼，帶我矯正無數的姿勢</div>
-        <div style="font-size:10px; color:#ccc; margin-top:5px;">Monitor ID: <span id="monitor-id">...</span></div>
-    </header>
-
-    <div class="main-container">
-        <div class="setup-card" id="setup-panel">
-            <h3>連線設定</h3>
-            <p>請選擇您架設的鏡頭數量：</p>
-            
-            <div class="camera-options">
-                <button class="option-btn active" onclick="setCamCount(1)">單鏡頭</button>
-                <button class="option-btn" onclick="setCamCount(2)">雙鏡頭 (側+背)</button>
-                <button class="option-btn" onclick="setCamCount(3)">三鏡頭 (全方位)</button>
-            </div>
-
-            <div id="inputs-area">
-                <div class="input-group">
-                    <label>鏡頭 ID (請看手機畫面)</label>
-                    <input type="text" id="cam1-id" placeholder="例如: 8851">
-                </div>
-            </div>
-
-            <button class="btn-primary" onclick="startConnection()">開始連線</button>
-        </div>
-
-        <div id="video-grid"></div>
-    </div>
-
-    <footer>&copy; 2025年 北醫大兼任教練曾國峰製作</footer>
+    <div id="video-container"></div>
 
     <script>
-        // --- 全域變數 ---
-        let peer;
-        let currentMode = 1;
-        // 用來對應 ID 與 Video 元素的 Map
-        const remoteStreams = {}; 
+        // --- 除錯工具：把 console.log 印在畫面上 ---
+        function log(msg) {
+            const box = document.getElementById('debug-console');
+            const time = new Date().toLocaleTimeString();
+            box.innerHTML += `[${time}] ${msg}<br>`;
+            box.scrollTop = box.scrollHeight;
+            console.log(msg);
+        }
 
-        // 初始化 Peer (電腦端隨機產生一個 ID 即可，不需固定)
-        peer = new Peer();
-        
+        // --- PeerJS 初始化 ---
+        const peer = new Peer();
+        let myMonitorId = null;
+
         peer.on('open', (id) => {
-            document.getElementById('monitor-id').innerText = id;
-            console.log("Monitor ready with ID: " + id);
+            myMonitorId = id;
+            log(`✅ 電腦端連線成功！我的 ID: ${id}`);
+            log(`👉 現在請輸入手機 ID 並按連線`);
+            
+            // 解鎖按鈕
+            const btn = document.getElementById('btn-connect');
+            btn.disabled = false;
+            btn.innerText = "開始連線";
+            btn.style.backgroundColor = "#800020";
         });
 
-        // 監聽是否有鏡頭「回撥」影像過來
+        peer.on('error', (err) => {
+            log(`❌ 系統錯誤: ${err.type}`);
+        });
+
+        // 當手機「回撥」影像過來時
         peer.on('call', (call) => {
-            console.log("收到來自鏡頭的影像呼叫: " + call.peer);
-            
+            log(`📞 收到來自手機 (${call.peer}) 的影像串流請求...`);
             call.answer(null); // 接聽
             
             call.on('stream', (remoteStream) => {
-                // 根據對方的 ID，找到對應的 Video 元素
-                const peerId = call.peer;
-                const videoEl = document.getElementById(`video-${peerId}`);
-                const canvasEl = document.getElementById(`canvas-${peerId}`);
-                
-                if (videoEl) {
-                    videoEl.srcObject = remoteStream;
-                    videoEl.onloadedmetadata = () => {
-                        videoEl.play();
-                        // 隱藏「連線中」文字
-                        const msgDiv = document.getElementById(`msg-${peerId}`);
-                        if(msgDiv) msgDiv.style.display = 'none';
-                        
-                        // 啟動 MediaPipe 偵測 (這裡先做簡單影像顯示，AI 稍後加上)
-                        startPoseDetection(videoEl, canvasEl);
-                    };
-                }
+                log(`🎬 影像訊號已接收！正在顯示...`);
+                showVideo(call.peer, remoteStream);
+            });
+            
+            call.on('error', (err) => {
+                log(`❌ 影像傳輸錯誤: ${err}`);
             });
         });
 
-        // --- UI 邏輯 ---
-        function setCamCount(count) {
-            currentMode = count;
-            const btns = document.querySelectorAll('.option-btn');
-            btns.forEach((b, index) => {
-                if (index + 1 === count) b.classList.add('active');
-                else b.classList.remove('active');
-            });
-
-            const area = document.getElementById('inputs-area');
-            let html = '';
-            
-            if (count === 1) {
-                html += createInput("cam1-id", "鏡頭 ID");
-            } else if (count === 2) {
-                html += createInput("cam1-id", "側面鏡頭 (矢狀面) - 偵測前傾");
-                html += createInput("cam2-id", "背面鏡頭 (額狀面) - 偵測骨盆歪斜");
-            } else if (count === 3) {
-                html += createInput("cam1-id", "側面鏡頭 (矢狀面) - 偵測前傾");
-                html += createInput("cam2-id", "背面鏡頭 (額狀面) - 偵測骨盆歪斜");
-                html += createInput("cam3-id", "正面鏡頭 (額狀面) - 偵測膝蓋/腳踝");
-            }
-            area.innerHTML = html;
-        }
-
-        function createInput(id, label) {
-            return `
-                <div class="input-group">
-                    <label>${label}</label>
-                    <input type="text" id="${id}" placeholder="輸入手機上的 4 位數 ID">
-                </div>`;
-        }
-
-        // --- 核心連線邏輯 ---
+        // --- 主動連線邏輯 ---
         function startConnection() {
-            const grid = document.getElementById('video-grid');
-            grid.innerHTML = ''; // 清空舊畫面
-
-            const ids = [];
-            const labels = [];
-
-            // 收集輸入的 ID
-            if (currentMode >= 1) {
-                ids.push(document.getElementById('cam1-id').value.trim());
-                labels.push("主畫面 / 側面");
-            }
-            if (currentMode >= 2) {
-                ids.push(document.getElementById('cam2-id').value.trim());
-                labels.push("背面觀");
-            }
-            if (currentMode >= 3) {
-                ids.push(document.getElementById('cam3-id').value.trim());
-                labels.push("正面觀");
-            }
-
-            if(ids.some(id => id === "")) {
-                alert("請輸入完整的鏡頭 ID");
+            const targetId = document.getElementById('target-id').value.trim();
+            if (!targetId) {
+                alert("請輸入 ID");
                 return;
             }
 
-            document.getElementById('setup-panel').style.display = 'none';
+            log(`🚀 嘗試連線到手機 ID: ${targetId}...`);
+            
+            // 建立數據連線 (Data Connection) 用來觸發手機
+            const conn = peer.connect(targetId);
 
-            // 建立畫面格子並發送連線請求
-            ids.forEach((targetId, index) => {
-                createVideoBox(labels[index], targetId, currentMode === 1);
-                connectToCamera(targetId);
+            conn.on('open', () => {
+                log(`✅ 已連接到手機 (${targetId})！等待手機回傳影像...`);
+                // 這裡如果不送資料，有些瀏覽器不會觸發 open，所以我們送一個空包
+                conn.send("HELLO_FROM_MONITOR");
             });
+
+            conn.on('error', (err) => {
+                log(`❌ 連線失敗: 無法連接 ${targetId}。請確認：`);
+                log(`1. 手機是否螢幕亮著？`);
+                log(`2. ID 是否輸入正確？`);
+                log(`3. 兩者是否在同一個網路環境？`);
+            });
+            
+            // 設定 5 秒超時檢查
+            setTimeout(() => {
+                const vid = document.getElementById(`video-${targetId}`);
+                if (!vid) {
+                    log(`⚠️ 5秒過去了，還沒收到影像。請重整手機網頁試試看。`);
+                }
+            }, 5000);
         }
 
-        function createVideoBox(label, id, isSingle) {
-            const grid = document.getElementById('video-grid');
+        // --- 顯示影像 ---
+        function showVideo(id, stream) {
+            const container = document.getElementById('video-container');
+            
+            // 避免重複建立
+            if (document.getElementById(`wrapper-${id}`)) return;
+
             const div = document.createElement('div');
-            div.className = `video-wrapper ${isSingle ? 'single-mode' : ''}`;
+            div.className = 'vid-box';
+            div.id = `wrapper-${id}`;
             div.innerHTML = `
-                <div class="overlay-label">${label}</div>
-                <div class="status-msg" id="msg-${id}">
-                    <div>連線中...</div>
-                    <div style="font-size:12px; margin-top:5px;">呼叫 ID: ${id}</div>
-                </div>
-                <video id="video-${id}" playsinline autoplay></video>
+                <div class="label">ID: ${id}</div>
+                <video id="video-${id}" autoplay playsinline></video>
                 <canvas id="canvas-${id}"></canvas>
             `;
-            grid.appendChild(div);
+            container.appendChild(div);
+
+            const videoEl = document.getElementById(`video-${id}`);
+            const canvasEl = document.getElementById(`canvas-${id}`);
+            
+            videoEl.srcObject = stream;
+            
+            // 確保影片播放
+            videoEl.onloadedmetadata = () => {
+                videoEl.play().catch(e => log("播放失敗(需手動點擊):" + e));
+                startPoseDetection(videoEl, canvasEl);
+            };
         }
 
-        function connectToCamera(targetId) {
-            console.log("嘗試連線到手機: " + targetId);
-            // 建立 Data Connection，這會觸發手機端的 connection 事件
-            const conn = peer.connect(targetId);
-            
-            conn.on('open', () => {
-                console.log("已連接到手機訊號: " + targetId);
-            });
-            
-            conn.on('error', (err) => {
-                alert("連線失敗: " + err);
-            });
-        }
-
-        // --- 簡單的 MediaPipe 啟動函式 (只做繪製，暫不分析) ---
+        // --- MediaPipe 簡單繪製 ---
         function startPoseDetection(videoElement, canvasElement) {
             const canvasCtx = canvasElement.getContext('2d');
-            
-            const pose = new Pose({locateFile: (file) => {
-                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
-            }});
+            const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
             
             pose.setOptions({
                 modelComplexity: 1,
@@ -270,10 +171,7 @@
             pose.onResults((results) => {
                 canvasCtx.save();
                 canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                // 畫出影像
                 canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-                
-                // 畫出骨架
                 if (results.poseLandmarks) {
                     drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
                     drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1});
