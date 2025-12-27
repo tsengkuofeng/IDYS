@@ -16,7 +16,8 @@
         /* Modal */
         #disclaimer-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 999; backdrop-filter: blur(5px); }
         .modal-content { background: var(--bg-color); padding: 40px; border-radius: 8px; max-width: 500px; text-align: center; border-top: 5px solid var(--accent-color); }
-        .btn-primary { background-color: var(--accent-color); color: white; border: none; padding: 12px 30px; font-size: 16px; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background-color: var(--accent-color); color: white; border: none; padding: 12px 30px; font-size: 16px; border-radius: 4px; cursor: pointer; transition: 0.2s; }
+        .btn-primary:hover { opacity: 0.9; }
         
         header { text-align: center; padding: 20px 0; border-bottom: 1px solid var(--gray-light); background: white; z-index: 10; }
         h1 { margin: 0; font-weight: 700; color: var(--text-color); }
@@ -25,22 +26,27 @@
         .main-container { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; overflow-y: auto; }
         .setup-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 700px; text-align: center; margin-bottom: 20px; }
         
+        .camera-options { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .option-btn { background: transparent; border: 1px solid var(--accent-color); color: var(--accent-color); padding: 8px 16px; border-radius: 20px; cursor: pointer; transition: 0.2s; }
+        .option-btn.active { background: var(--accent-color); color: white; }
+        .option-btn:hover { background: rgba(128,0,32,0.1); }
+        
         .input-group { margin: 15px 0; text-align: left; }
+        .input-group label { display: block; margin-bottom: 5px; font-size: 13px; font-weight: bold; color: #666; }
         .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
         
         #video-grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 20px; }
         
-        /* 影片容器：包含原始影片(隱藏)與Canvas(顯示) */
-        .video-wrapper { position: relative; background: #000; border-radius: 8px; overflow: hidden; width: 480px; aspect-ratio: 4/3; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        /* 影片容器 */
+        .video-wrapper { position: relative; background: #000; border-radius: 8px; overflow: hidden; width: 400px; aspect-ratio: 3/4; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        /* 單鏡頭模式比較大 */
+        .video-wrapper.single-mode { width: 480px; aspect-ratio: 4/3; }
         
-        /* 讓原始影片隱藏但保持運作 */
         .video-wrapper video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
-        
-        /* Canvas 蓋在上面 */
         .output_canvas { width: 100%; height: 100%; display: block; }
         
         .overlay-label { position: absolute; top: 10px; left: 10px; background: rgba(128, 0, 32, 0.9); color: white; padding: 4px 10px; font-size: 12px; border-radius: 4px; z-index: 10; font-weight: bold; }
-        .alert-box { position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(255,0,0,0.7); color: white; padding: 5px; font-size: 14px; border-radius: 4px; display: none; text-align: center; }
+        .alert-box { position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(255,0,0,0.7); color: white; padding: 8px; font-size: 14px; border-radius: 4px; display: none; text-align: center; font-weight: bold; line-height: 1.4; }
         
         footer { text-align: center; padding: 15px; font-size: 12px; color: #888; border-top: 1px solid var(--gray-light); }
     </style>
@@ -63,67 +69,105 @@
     <div class="main-container">
         <div class="setup-card" id="setup-panel">
             <h3>連線設定</h3>
-            <div class="input-group"><label>請輸入手機端 ID</label><input type="text" id="cam1-id" placeholder="例如：4821"></div>
+            <p>請選擇鏡頭數量：</p>
+            <div class="camera-options">
+                <button class="option-btn active" onclick="setCamCount(1)">單鏡頭</button>
+                <button class="option-btn" onclick="setCamCount(2)">雙鏡頭</button>
+                <button class="option-btn" onclick="setCamCount(3)">三鏡頭</button>
+            </div>
+            
+            <div id="inputs-area">
+                <div class="input-group"><label>鏡頭 ID</label><input type="text" id="cam1-id" placeholder="輸入手機 ID"></div>
+            </div>
+            
             <button class="btn-primary" onclick="startSystem()">開始連線</button>
         </div>
+        
         <div id="video-grid"></div>
     </div>
 
-    <footer>&copy; 2025 IDYS System</footer>
+    <footer>&copy; 2025年 IDYS 動作回饋分析系統</footer>
 
     <script>
+        let currentMode = 1;
         const myPeer = new Peer(); 
         let audioContext;
         let isAudioEnabled = false;
+        let lastAlertTime = 0; // 全局音效冷卻時間
 
-        // 初始化音效 (瀏覽器政策要求使用者點擊後才能播放聲音)
         function enableAudioAndStart() {
             document.getElementById('disclaimer-modal').style.display='none';
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             isAudioEnabled = true;
         }
 
-        // 發出嗶嗶聲
         function playAlertSound() {
             if (!isAudioEnabled || !audioContext) return;
+            const now = Date.now();
+            if (now - lastAlertTime < 1000) return; // 避免太吵，1秒最多叫一次
+            
+            lastAlertTime = now;
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
             oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); 
             gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
             oscillator.start();
-            oscillator.stop(audioContext.currentTime + 0.1); // 短音 0.1秒
+            oscillator.stop(audioContext.currentTime + 0.15);
         }
 
-        // --- MediaPipe 設定 ---
-        const pose = new Pose({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
-        }});
-        
-        pose.setOptions({
-            modelComplexity: 1,
-            smoothLandmarks: true,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
+        // --- 多鏡頭 UI 邏輯 ---
+        function setCamCount(count) {
+            currentMode = count;
+            document.querySelectorAll('.option-btn').forEach((b, i) => {
+                b.classList.toggle('active', i + 1 === count);
+            });
+            const area = document.getElementById('inputs-area');
+            let html = '';
+            if (count === 1) html += createInput("cam1-id", "主鏡頭 ID");
+            if (count === 2) {
+                html += createInput("cam1-id", "鏡頭 1 ID (建議:側面)");
+                html += createInput("cam2-id", "鏡頭 2 ID (建議:背面)");
+            }
+            if (count === 3) {
+                html += createInput("cam1-id", "鏡頭 1 ID (側面)");
+                html += createInput("cam2-id", "鏡頭 2 ID (背面)");
+                html += createInput("cam3-id", "鏡頭 3 ID (正面)");
+            }
+            area.innerHTML = html;
+        }
 
-        pose.onResults(onPoseResults);
+        function createInput(id, label) {
+            return `<div class="input-group"><label>${label}</label><input type="text" id="${id}" placeholder="輸入手機上的 4 位數 ID"></div>`;
+        }
 
+        // --- 系統啟動 ---
         function startSystem() {
-            const id = document.getElementById('cam1-id').value;
-            if(!id) return alert("請輸入 ID");
-            
             document.getElementById('setup-panel').style.display = 'none';
-            createVideoBox("主畫面分析", id);
-            connectToCamera(id);
+            const grid = document.getElementById('video-grid');
+            grid.innerHTML = ''; 
+
+            const configs = [];
+            // 收集所有輸入的 ID
+            for(let i=1; i<=currentMode; i++) {
+                const val = document.getElementById(`cam${i}-id`).value;
+                if(val) configs.push({id: val, label: `鏡頭 ${i}`});
+            }
+
+            if(configs.length === 0) return alert("請至少輸入一組 ID");
+
+            configs.forEach(conf => {
+                createVideoBox(conf.label, conf.id, currentMode === 1);
+                connectAndAnalyze(conf.id);
+            });
         }
 
-        function createVideoBox(label, id) {
+        function createVideoBox(label, id, isSingle) {
             const grid = document.getElementById('video-grid');
             const div = document.createElement('div');
-            div.className = `video-wrapper`;
+            div.className = `video-wrapper ${isSingle ? 'single-mode' : ''}`;
             div.innerHTML = `
                 <div class="overlay-label">${label}</div>
                 <video id="vid-${id}" autoplay playsinline></video>
@@ -133,37 +177,61 @@
             grid.appendChild(div);
         }
 
-        function connectToCamera(targetId) {
+        // --- 連線與 AI 初始化 ---
+        function connectAndAnalyze(targetId) {
             const conn = myPeer.connect(targetId);
+            
             myPeer.on('call', (call) => {
-                call.answer();
-                call.on('stream', (remoteStream) => {
-                    const videoEl = document.getElementById(`vid-${call.peer}`);
-                    const canvasEl = document.getElementById(`canvas-${call.peer}`);
-                    
-                    if (videoEl) {
-                        videoEl.srcObject = remoteStream;
-                        videoEl.onloadedmetadata = () => {
-                            videoEl.play();
-                            // 啟動 AI 迴圈
-                            startMediaPipeLoop(videoEl, canvasEl);
-                        };
-                    }
-                });
+                // 這裡簡單判定：只要有電話進來，就接聽
+                // 如果是多鏡頭，我們需要確認這個 call 是來自哪個 peer，這比較複雜
+                // 在簡單版中，我們讓每個 connect 成功後，對方就會 call back
+                
+                if (call.peer === targetId) {
+                    call.answer();
+                    call.on('stream', (remoteStream) => {
+                        const videoEl = document.getElementById(`vid-${targetId}`);
+                        const canvasEl = document.getElementById(`canvas-${targetId}`);
+                        const alertEl = document.getElementById(`alert-${targetId}`);
+                        
+                        if (videoEl && canvasEl) {
+                            videoEl.srcObject = remoteStream;
+                            videoEl.onloadedmetadata = () => {
+                                videoEl.play();
+                                // 為這個畫面啟動獨立的 AI 分析
+                                initPoseAnalysis(videoEl, canvasEl, alertEl);
+                            };
+                        }
+                    });
+                }
             });
         }
 
-        // 循環送畫面給 AI
-        function startMediaPipeLoop(videoElement, canvasElement) {
+        // --- 核心：獨立 AI 分析模組 ---
+        function initPoseAnalysis(videoElement, canvasElement, alertBox) {
             const ctx = canvasElement.getContext('2d');
             
+            // 每個鏡頭建立一個獨立的 Pose 實例
+            const pose = new Pose({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+            }});
+            
+            pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            pose.onResults((results) => {
+                // 這裡的 results 只屬於這個鏡頭
+                drawAndAnalyze(ctx, results, alertBox);
+            });
+
+            // 啟動偵測迴圈
             async function step() {
-                // 調整 canvas 尺寸匹配影片
                 if(videoElement.videoWidth) {
                     canvasElement.width = videoElement.videoWidth;
                     canvasElement.height = videoElement.videoHeight;
-                    
-                    // 傳送畫面給 Pose 模型
                     await pose.send({image: videoElement});
                 }
                 requestAnimationFrame(step);
@@ -171,107 +239,84 @@
             step();
         }
 
-        // --- AI 分析核心邏輯 ---
-        let lastAlertTime = 0;
-
-        function onPoseResults(results) {
-            // 這裡假設只有一個畫面在跑，實際多畫面要改寫結構，目前先針對單畫面測試
-            const canvas = document.querySelector('.output_canvas'); 
-            if(!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
+        function drawAndAnalyze(ctx, results, alertBox) {
+            const width = ctx.canvas.width;
+            const height = ctx.canvas.height;
 
             ctx.save();
             ctx.clearRect(0, 0, width, height);
-            
-            // 畫出原始影像
             ctx.drawImage(results.image, 0, 0, width, height);
 
             if (results.poseLandmarks) {
-                // 1. 畫出骨架
+                // 1. 繪製骨架
                 drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#FFFFFF', lineWidth: 2});
                 drawLandmarks(ctx, results.poseLandmarks, {color: '#800020', lineWidth: 1, radius: 3});
 
-                // 2. 畫出「虛擬中軸線」 (黃色)
-                const leftShoulder = results.poseLandmarks[11];
-                const rightShoulder = results.poseLandmarks[12];
-                const leftHip = results.poseLandmarks[23];
-                const rightHip = results.poseLandmarks[24];
+                // 2. 繪製中軸 (黃色)
+                const lm = results.poseLandmarks;
+                const leftShoulder = lm[11];
+                const rightShoulder = lm[12];
+                const leftHip = lm[23];
+                const rightHip = lm[24];
 
                 if(leftShoulder && rightShoulder && leftHip && rightHip) {
-                    const midShoulderX = (leftShoulder.x + rightShoulder.x) / 2;
-                    const midShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-                    const midHipX = (leftHip.x + rightHip.x) / 2;
-                    const midHipY = (leftHip.y + rightHip.y) / 2;
+                    const midS_X = (leftShoulder.x + rightShoulder.x) / 2;
+                    const midS_Y = (leftShoulder.y + rightShoulder.y) / 2;
+                    const midH_X = (leftHip.x + rightHip.x) / 2;
+                    const midH_Y = (leftHip.y + rightHip.y) / 2;
 
                     ctx.beginPath();
-                    ctx.strokeStyle = '#FFFF00'; // 黃色中軸
+                    ctx.strokeStyle = '#FFFF00';
                     ctx.lineWidth = 3;
                     ctx.setLineDash([10, 5]);
-                    ctx.moveTo(midShoulderX * width, midShoulderY * height);
-                    ctx.lineTo(midHipX * width, midHipY * height);
+                    ctx.moveTo(midS_X * width, midS_Y * height);
+                    ctx.lineTo(midH_X * width, midH_Y * height);
                     ctx.stroke();
                     ctx.setLineDash([]);
 
-                    // --- 生物力學偵測邏輯 ---
-                    analyzeSquat(results.poseLandmarks, midShoulderX, midHipX);
+                    // 3. 執行生物力學判定
+                    const messages = checkBiomechanics(lm, midS_X, midH_X);
+                    
+                    if (messages.length > 0) {
+                        alertBox.style.display = 'block';
+                        alertBox.innerHTML = messages.join('<br>');
+                        playAlertSound(); // 有問題就叫
+                    } else {
+                        alertBox.style.display = 'none';
+                    }
                 }
             }
             ctx.restore();
         }
 
-        function analyzeSquat(lm, midShoulderX, midHipX) {
-            const alertBox = document.querySelector('.alert-box');
-            let messages = [];
+        function checkBiomechanics(lm, midS_X, midH_X) {
+            const msgs = [];
             
-            // 閾值設定 (需依實際情況微調)
-            const THRESHOLD_SHIFT = 0.05; // 軀幹歪斜
-            const THRESHOLD_HIP_TILT = 0.04; // 骨盆高低
-            const THRESHOLD_VALGUS = 0.03; // 膝蓋內夾
-
-            // 1. 軀幹側移 (Spine Lateral Shift) - 背面/正面
-            // 檢查肩膀中點與骨盆中點的 X 軸偏差
-            if (Math.abs(midShoulderX - midHipX) > THRESHOLD_SHIFT) {
-                messages.push("⚠️ 軀幹歪斜 (Shift)");
+            // 閾值
+            const T_SHIFT = 0.05; 
+            const T_TILT = 0.04;
+            
+            // 1. 軀幹歪斜 (Shift)
+            if (Math.abs(midS_X - midH_X) > T_SHIFT) {
+                msgs.push("⚠️ 軀幹歪斜 (Shift)");
             }
 
-            // 2. 骨盆水平歪斜 (Pelvic Tilt/Hike) - 背面/正面
-            // 檢查左右髖關節 Y 軸高度差
+            // 2. 骨盆高低 (Tilt)
             const hipDiff = Math.abs(lm[23].y - lm[24].y);
-            if (hipDiff > THRESHOLD_HIP_TILT) {
-                messages.push("⚠️ 骨盆高低不均");
+            if (hipDiff > T_TILT) {
+                msgs.push("⚠️ 骨盆高低不均");
             }
 
-            // 3. 膝蓋內夾 (Knee Valgus) - 正面
-            // 簡單判斷：膝蓋 X 座標是否比腳踝更靠內 (對於深蹲)
-            // 左腳 (25膝, 27踝) / 右腳 (26膝, 28踝)
-            // 注意：MediaPipe 座標 normalized, 0在左邊, 1在右邊
-            // 這裡做一個簡單的寬度比較：如果膝蓋寬度 < 腳踝寬度 * 0.8，可能有內夾
-            const kneeWidth = Math.abs(lm[25].x - lm[26].x);
-            const ankleWidth = Math.abs(lm[27].x - lm[28].x);
+            // 3. 膝蓋內夾 (Valgus) - 簡單寬度法
+            if (lm[27].visibility > 0.6 && lm[28].visibility > 0.6) {
+                const kneeW = Math.abs(lm[25].x - lm[26].x);
+                const ankleW = Math.abs(lm[27].x - lm[28].x);
+                if (kneeW < ankleW * 0.85) {
+                    msgs.push("⚠️ 膝蓋內夾 (Valgus)");
+                }
+            }
             
-            // 只有當全身都看得到時才偵測
-            if (lm[27].visibility > 0.5 && lm[28].visibility > 0.5) {
-                if (kneeWidth < ankleWidth * 0.8) { 
-                    messages.push("⚠️ 膝蓋內夾 (Valgus)");
-                }
-            }
-
-            // --- 顯示警告與聲音 ---
-            if (messages.length > 0) {
-                alertBox.style.display = 'block';
-                alertBox.innerHTML = messages.join('<br>');
-                
-                // 聲音控制 (每秒最多叫一次，避免太吵)
-                const now = Date.now();
-                if (now - lastAlertTime > 1000) {
-                    playAlertSound();
-                    lastAlertTime = now;
-                }
-            } else {
-                alertBox.style.display = 'none';
-            }
+            return msgs;
         }
     </script>
 </body>
