@@ -21,13 +21,28 @@
         
         .btn-start {
             background-color: var(--accent-color); color: white; width: 100%; padding: 15px;
-            border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
+            border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s;
         }
+        .btn-start:active { opacity: 0.8; }
+
+        /* 切換鏡頭按鈕樣式 */
+        .btn-switch {
+            background-color: white; color: var(--accent-color); border: 1px solid var(--accent-color);
+            padding: 8px 15px; border-radius: 20px; font-size: 14px; cursor: pointer; margin-top: 10px;
+            display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%;
+        }
+        .btn-switch:hover { background-color: #fcedf2; }
         
         #id-container { display: none; text-align: center; }
         .big-id { font-size: 36px; color: var(--accent-color); font-weight: 800; letter-spacing: 5px; margin: 15px 0; background: #f4f4f4; padding: 10px; border-radius: 8px; }
         
-        video { width: 100%; border-radius: 8px; background: #000; margin-top: 15px; }
+        /* 影片容器 */
+        .video-container { position: relative; width: 100%; margin-top: 15px; }
+        video { width: 100%; border-radius: 8px; background: #000; transform: scaleX(1); /* 預設不鏡像 */ }
+        
+        /* 當前鏡頭時，通常習慣鏡像顯示，可透過 JS 控制 class */
+        video.mirrored { transform: scaleX(-1); }
+
         .status-badge { display: inline-block; padding: 6px 12px; background: #eee; border-radius: 20px; font-size: 13px; color: #666; margin-top: 5px; font-weight: 500; }
         .status-badge.connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         
@@ -60,7 +75,15 @@
         <label>請將此號碼輸入至電腦端：</label>
         <div class="big-id" id="my-peer-id">...</div>
         <div class="status-badge" id="conn-status">啟動中...</div>
-        <video id="localVideo" autoplay muted playsinline></video>
+        
+        <div class="video-container">
+            <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+
+        <button class="btn-switch" onclick="switchCamera()">
+            🔄 切換前後鏡頭
+        </button>
+        
         <p style="font-size:12px; color:#888; margin-top:10px;">請保持螢幕開啟，勿鎖定手機</p>
     </div>
     
@@ -69,6 +92,8 @@
     <script>
         let peer;
         let localStream;
+        let currentCall = null; // 儲存當前的通話連線，以便切換鏡頭時更新
+        let currentFacingMode = 'environment'; // 預設使用後鏡頭
 
         function generateShortId() {
             return Math.floor(1000 + Math.random() * 9000).toString();
@@ -97,13 +122,16 @@
                 badge.innerText = "✅ 已連線至主控台";
                 badge.classList.add('connected');
                 
+                // 當數據連線建立時，發起影像通話
                 if(localStream) {
-                    peer.call(conn.peer, localStream);
+                    currentCall = peer.call(conn.peer, localStream);
                 }
             });
             
+            // 處理被動的通話請求 (如果電腦端發起)
             peer.on('call', (call) => {
                 call.answer(localStream);
+                currentCall = call;
             });
         }
 
@@ -116,19 +144,70 @@
             idContainer.style.display = 'block';
             statusBadge.innerText = "正在請求相機權限...";
 
+            await startVideo(currentFacingMode);
+            
+            statusBadge.innerText = "相機就緒，正在獲取 ID...";
+            initPeer();
+        }
+
+        // 獨立出啟動視訊的函式
+        async function startVideo(facingMode) {
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }, 
+                // 如果已經有開啟的串流，先停止它 (釋放資源)
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                }
+
+                const constraints = { 
+                    video: { 
+                        facingMode: facingMode, 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 } 
+                    }, 
                     audio: false 
-                });
-                document.getElementById('localVideo').srcObject = localStream;
-                statusBadge.innerText = "相機就緒，正在獲取 ID...";
+                };
+
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
                 
-                initPeer();
+                const videoEl = document.getElementById('localVideo');
+                videoEl.srcObject = localStream;
+
+                // 如果是前鏡頭，加上鏡像效果比較自然
+                if (facingMode === 'user') {
+                    videoEl.classList.add('mirrored');
+                } else {
+                    videoEl.classList.remove('mirrored');
+                }
+
+                return localStream;
+
             } catch (err) {
-                alert("無法開啟相機，請確認權限或網址是否為 HTTPS");
-                settingsCard.style.display = 'block';
-                idContainer.style.display = 'none';
+                console.error(err);
+                alert("無法開啟相機，請確認權限。\n若使用 iOS，請確保在 Safari 開啟。");
+                throw err;
+            }
+        }
+
+        // 切換鏡頭的核心邏輯
+        async function switchCamera() {
+            // 1. 切換模式狀態
+            currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+            
+            // 2. 重新啟動相機
+            const newStream = await startVideo(currentFacingMode);
+
+            // 3. 如果目前正在連線中，需要「無縫替換」傳送給電腦的軌道
+            if (currentCall && currentCall.peerConnection) {
+                const videoTrack = newStream.getVideoTracks()[0];
+                
+                // 找到負責傳送影像的 Sender
+                const sender = currentCall.peerConnection.getSenders().find((s) => s.track.kind === 'video');
+                
+                if (sender) {
+                    // 替換軌道，電腦端不會斷線，只會看到畫面變了
+                    sender.replaceTrack(videoTrack);
+                    console.log("已切換連線中的影像軌道");
+                }
             }
         }
     </script>
